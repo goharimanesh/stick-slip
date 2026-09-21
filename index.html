@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<title>Real-Time Drilling Simulation - Stick-Slip + PI Controller</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: #0f1419; color: #e6e6e6; margin: 0; padding: 15px;
+  }
+  h1 { text-align: center; color: #4da3ff; margin: 0 0 5px 0; font-size: 22px; }
+  .authors {
+    text-align: center; color: #ffaa33; font-size: 13px;
+    font-weight: 600; margin-bottom: 5px;
+    letter-spacing: 0.3px;
+  }
+  .subtitle { text-align: center; color: #888; margin-bottom: 15px; font-size: 12px; }
+  .container { max-width: 1600px; margin: 0 auto; }
+
+  .main-grid {
+    display: grid; grid-template-columns: 420px 1fr; gap: 15px;
+  }
+  @media (max-width: 1100px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: #1a2028; border-radius: 10px; padding: 15px;
+    border: 1px solid #2a3542; margin-bottom: 15px;
+  }
+  .panel h3 {
+    margin: 0 0 12px 0; color: #4da3ff; font-size: 15px;
+    border-bottom: 1px solid #2a3542; padding-bottom: 8px;
+  }
+
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .control-group { display: flex; flex-direction: column; }
+  .control-group label { font-size: 11px; color: #9aa8b8; margin-bottom: 4px; }
+  .control-group input {
+    padding: 6px 8px; border: 1px solid #2a3542; border-radius: 5px;
+    background: #0f1419; color: #e6e6e6; font-size: 13px;
+  }
+
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+  .mode-toggle button {
+    flex: 1; padding: 8px; border: 1px solid #2a3542;
+    background: #0f1419; color: #9aa8b8; border-radius: 5px;
+    cursor: pointer; font-size: 12px; transition: all 0.2s;
+  }
+  .mode-toggle button.active {
+    background: #4da3ff; color: #fff; border-color: #4da3ff;
+  }
+
+  .action-btn {
+    width: 100%; padding: 10px; background: #2ecc71; color: #fff;
+    border: none; border-radius: 6px; font-size: 14px;
+    font-weight: 600; cursor: pointer; margin-top: 10px;
+  }
+  .action-btn:hover { background: #27ae60; }
+  .action-btn:disabled { background: #444; cursor: not-allowed; }
+
+  .playback {
+    display: flex; gap: 8px; align-items: center;
+    margin-top: 12px; padding: 10px;
+    background: #0f1419; border-radius: 8px;
+    border: 1px solid #2a3542;
+  }
+  .playback button {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #4da3ff; color: #fff; border: none;
+    font-size: 16px; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .playback button:hover { background: #3a8be0; transform: scale(1.05); }
+  .playback button.reset { background: #e67e22; }
+  .playback button.reset:hover { background: #d35400; }
+  .playback .speed-control {
+    display: flex; flex-direction: column; flex: 1; margin-right: 8px;
+  }
+  .playback .speed-control label {
+    font-size: 10px; color: #9aa8b8; margin-bottom: 2px;
+  }
+  .playback .speed-control input { width: 100%; accent-color: #4da3ff; }
+  .playback .speed-val {
+    font-size: 12px; color: #4da3ff; font-family: monospace;
+    min-width: 40px; text-align: center;
+  }
+
+  #canvas3d {
+    width: 100%; height: 440px; border-radius: 8px;
+    background: linear-gradient(180deg, #0a0e12 0%, #1a2028 100%);
+    position: relative; overflow: hidden;
+  }
+  .canvas-label {
+    position: absolute; top: 10px; right: 10px;
+    background: rgba(0,0,0,0.7); padding: 6px 12px;
+    border-radius: 5px; font-size: 12px; color: #4da3ff;
+  }
+  .canvas-mode {
+    position: absolute; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.7); padding: 6px 12px;
+    border-radius: 5px; font-size: 12px; font-weight: 700;
+  }
+
+  .timeline {
+    margin-top: 12px; padding: 10px;
+    background: #0f1419; border-radius: 8px;
+    border: 1px solid #2a3542;
+  }
+  .timeline input[type="range"] { width: 100%; accent-color: #4da3ff; }
+  .timeline .row {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: #9aa8b8; margin-top: 4px;
+  }
+  .timeline .row span { font-family: monospace; color: #4da3ff; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-top: 12px;
+  }
+  .stat-box {
+    background: #0f1419; border-radius: 6px; padding: 8px;
+    text-align: center; border: 1px solid #2a3542;
+  }
+  .stat-box .label { font-size: 10px; color: #888; }
+  .stat-box .value {
+    font-size: 14px; font-weight: 700; color: #4da3ff; margin-top: 2px;
+    font-family: monospace;
+  }
+
+  .plots-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;
+  }
+  @media (max-width: 1000px) { .plots-grid { grid-template-columns: 1fr; } }
+  .plot-container { height: 240px; }
+
+  .fps-badge {
+    position: fixed; bottom: 10px; right: 10px;
+    background: rgba(0,0,0,0.7); color: #2ecc71;
+    padding: 4px 10px; border-radius: 5px;
+    font-family: monospace; font-size: 11px;
+    z-index: 100;
+  }
+
+  .footer {
+    text-align: center; color: #666; font-size: 11px;
+    margin-top: 25px; padding-top: 15px;
+    border-top: 1px solid #2a3542;
+  }
+  .footer strong { color: #ffaa33; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Real-Time Interactive Drilling Simulation</h1>
+  <p class="authors">Hassan Ghanitoos, Masoud Goharimanesh, and Aliakbar Akbari</p>
+  <p class="subtitle">Stick-Slip Vibration + PI Controller + 3D Wellbore/Bit Animation + Real-Time Playback</p>
+
+  <div class="main-grid">
+    <!-- ===== LEFT PANEL ===== -->
+    <div>
+      <div class="panel">
+        <h3>Simulation Parameters</h3>
+
+        <div class="mode-toggle">
+          <button id="btnOpen" class="active" onclick="setMode('open')">
+            Without Controller (Open-Loop)
+          </button>
+          <button id="btnPI" onclick="setMode('pi')">
+            With PI Controller
+          </button>
+        </div>
+
+        <div class="controls">
+          <div class="control-group">
+            <label>&omega;<sub>ref</sub> (rad/s)</label>
+            <input type="number" id="omega_ref" value="10.47" step="0.1">
+          </div>
+          <div class="control-group">
+            <label>WOB (kN)</label>
+            <input type="number" id="WOB" value="120" step="1">
+          </div>
+          <div class="control-group">
+            <label>k<sub>T</sub> (N&middot;m/rad)</label>
+            <input type="number" id="kT" value="708" step="1">
+          </div>
+          <div class="control-group">
+            <label>c<sub>v</sub> (N&middot;m&middot;s/rad)</label>
+            <input type="number" id="cv" value="30" step="1">
+          </div>
+          <div class="control-group">
+            <label>K<sub>p</sub> (Proportional Gain)</label>
+            <input type="number" id="Kp" value="15000" step="500">
+          </div>
+          <div class="control-group">
+            <label>K<sub>i</sub> (Integral Gain)</label>
+            <input type="number" id="Ki" value="3000" step="100">
+          </div>
+          <div class="control-group">
+            <label>Simulation Duration (s)</label>
+            <input type="number" id="tmax" value="30" step="1">
+          </div>
+          <div class="control-group">
+            <label>ROP Coefficient c<sub>1</sub></label>
+            <input type="number" id="c1" value="1.2e-5" step="1e-6">
+          </div>
+        </div>
+
+        <button class="action-btn" id="runBtn" onclick="runSimulation()">
+          &#9654; Run Simulation
+        </button>
+      </div>
+
+      <div class="panel">
+        <h3>Wellbore and Drill Bit View</h3>
+        <div id="canvas3d">
+          <div class="canvas-mode" id="modeBadge" style="background: rgba(231,76,60,0.9); color:#fff;">Open-Loop</div>
+          <div class="canvas-label" id="depthLabel">Depth: 0.00 m</div>
+        </div>
+
+        <!-- Playback controls -->
+        <div class="playback">
+          <button id="btnPlay" onclick="togglePlay()" title="Play/Pause">&#9654;</button>
+          <button id="btnReset" class="reset" onclick="resetPlayback()" title="Reset">&#8634;</button>
+          <div class="speed-control">
+            <label>Playback Speed</label>
+            <input type="range" id="speedSlider" min="0.25" max="4" step="0.25" value="1"
+                   oninput="updateSpeed(this.value)">
+          </div>
+          <span class="speed-val" id="speedVal">1.0&times;</span>
+        </div>
+
+        <!-- Timeline slider -->
+        <div class="timeline">
+          <input type="range" id="timeSlider" min="0" max="1000" value="0"
+                 oninput="onTimelineChange(this.value)">
+          <div class="row">
+            <span id="timeCurrent">0.00 s</span>
+            <span id="timeTotal">&mdash;</span>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat-box">
+            <div class="label">&omega;<sub>b</sub> (rad/s)</div>
+            <div class="value" id="s_omega">&mdash;</div>
+          </div>
+          <div class="stat-box">
+            <div class="label">ROP (mm/s)</div>
+            <div class="value" id="s_rop">&mdash;</div>
+          </div>
+          <div class="stat-box">
+            <div class="label">T<sub>b</sub> (N&middot;m)</div>
+            <div class="value" id="s_tb">&mdash;</div>
+          </div>
+          <div class="stat-box">
+            <div class="label">Phase</div>
+            <div class="value" id="s_phase">&mdash;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT PANEL: Plots ===== -->
+    <div>
+      <div class="plots-grid">
+        <div class="panel" style="margin-bottom:0;">
+          <h3>Bit Angular Velocity &omega;<sub>b</sub></h3>
+          <div class="plot-container" id="plot_omega"></div>
+        </div>
+        <div class="panel" style="margin-bottom:0;">
+          <h3>Bit Angle &theta;<sub>b</sub></h3>
+          <div class="plot-container" id="plot_theta"></div>
+        </div>
+        <div class="panel" style="margin-bottom:0;">
+          <h3>Reactive Torque T<sub>b</sub></h3>
+          <div class="plot-container" id="plot_Tb"></div>
+        </div>
+        <div class="panel" style="margin-bottom:0;">
+          <h3>Rate of Penetration (ROP)</h3>
+          <div class="plot-container" id="plot_ROP"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <strong>Hassan Ghanitoos, Masoud Goharimanesh, and Aliakbar Akbari</strong><br>
+    Based on Monteiro &amp; Trindade (2017) and Yigit &amp; Christoforou (2006)
+  </div>
+</div>
+
+<div class="fps-badge" id="fpsBadge">FPS: &mdash;</div>
+
+<script>
+/* =====================================================================
+   Authors: Hassan Ghanitoos, Masoud Goharimanesh, Aliakbar Akbari
+   Real-time interactive simulation of stick-slip vibrations in
+   oilwell drillstrings with optional PI speed control.
+===================================================================== */
+
+/* =====================================================================
+   GLOBAL STATE
+===================================================================== */
+let currentMode = 'open';
+let simOpen = null, simPI = null;
+let isPlaying = false;
+let playbackSpeed = 1.0;
+let playStartWallTime = 0;    // performance.now() when play started
+let playStartSimTime = 0;     // simulation time at play start
+let lastFrameIdx = -1;
+let animationLoopId = null;
+let fpsSamples = [];
+
+const J = 394, delta = 0.0001;
+const a1 = 0.029, a2 = 0.079, beta = 0.097, c2 = 0.0;
+const DT = 0.002;             // RK4 integration step (s)
+const SAMPLE_RATIO = 5;       // Store every Nth step for animation frames
+
+/* =====================================================================
+   PHYSICS: Reactive Torque (Stick-Slip Model)
+===================================================================== */
+function computeTb(omega_b, theta_b, theta_rt, kT, Nb) {
+  const T_trans = kT * (theta_rt - theta_b);
+  if (Math.abs(omega_b) <= delta) {
+    if (Math.abs(T_trans) <= a2 * Nb) return { Tb: T_trans, phase: 'Stick' };
+    return { Tb: a2 * Nb * Math.sign(T_trans), phase: 'Transition' };
+  }
+  const val = (a1 + (a2 - a1) * Math.exp(-beta * Math.abs(omega_b)))
+              * Nb * Math.sign(omega_b);
+  return { Tb: val, phase: 'Slip' };
+}
+
+/* =====================================================================
+   DERIVATIVES: state = [theta_b, omega_b, int_err]
+   PI controller applies extra torque on rotary table:
+      T_motor = Kp*(omega_ref - omega_b) + Ki*int_err
+===================================================================== */
+function derivatives(t, x, p) {
+  const theta_b = x[0];
+  const omega_b = x[1];
+  const int_err = x[2];
+  const { cv, kT, omega_ref, Nb, mode, Kp, Ki } = p;
+
+  const theta_rt = omega_ref * t;
+  const { Tb } = computeTb(omega_b, theta_b, theta_rt, kT, Nb);
+
+  const dtheta = omega_b;
+  let domega = (1 / J) * (-Tb - cv * omega_b - kT * (theta_b - theta_rt));
+
+  let derr = 0;
+  if (mode === 'pi') {
+    const err = omega_ref - omega_b;
+    const T_motor = Kp * err + Ki * int_err;
+    domega += T_motor / J;
+    derr = err;
+  }
+
+  return [dtheta, domega, derr];
+}
+
+/* =====================================================================
+   RK4 SOLVER: stores every SAMPLE_RATIO step
+===================================================================== */
+function solveRK4(tmax, dt, x0, params) {
+  const totalSteps = Math.floor(tmax / dt);
+  const storeCount = Math.floor(totalSteps / SAMPLE_RATIO) + 1;
+
+  const t     = new Float64Array(storeCount);
+  const theta = new Float64Array(storeCount);
+  const omega = new Float64Array(storeCount);
+
+  let x = [x0[0], x0[1], x0[2]];
+  t[0] = 0; theta[0] = x[0]; omega[0] = x[1];
+
+  let storeIdx = 1;
+  for (let i = 0; i < totalSteps; i++) {
+    const ti = i * dt;
+    const k1 = derivatives(ti, x, params);
+    const x2 = [x[0]+dt*k1[0]/2, x[1]+dt*k1[1]/2, x[2]+dt*k1[2]/2];
+    const k2 = derivatives(ti+dt/2, x2, params);
+    const x3 = [x[0]+dt*k2[0]/2, x[1]+dt*k2[1]/2, x[2]+dt*k2[2]/2];
+    const k3 = derivatives(ti+dt/2, x3, params);
+    const x4 = [x[0]+dt*k3[0], x[1]+dt*k3[1], x[2]+dt*k3[2]];
+    const k4 = derivatives(ti+dt, x4, params);
+
+    x[0] += (dt/6)*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);
+    x[1] += (dt/6)*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
+    x[2] += (dt/6)*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
+
+    if ((i + 1) % SAMPLE_RATIO === 0 && storeIdx < storeCount) {
+      t[storeIdx] = (i + 1) * dt;
+      theta[storeIdx] = x[0];
+      omega[storeIdx] = x[1];
+      storeIdx++;
+    }
+  }
+
+  return {
+    t: t.slice(0, storeIdx),
+    theta: theta.slice(0, storeIdx),
+    omega: omega.slice(0, storeIdx)
+  };
+}
+
+/* =====================================================================
+   POST-PROCESSING: Compute Tb, ROP, phase, cumulative depth
+===================================================================== */
+function postProcess(sim, params) {
+  const { kT, omega_ref, Nb, c1 } = params;
+  const n = sim.t.length;
+  const Tb = new Float64Array(n);
+  const ROP = new Float64Array(n);
+  const phase = new Array(n);
+  const depth = new Float64Array(n);
+
+  let cumDepth = 0;
+  for (let i = 0; i < n; i++) {
+    const theta_rt = omega_ref * sim.t[i];
+    const r = computeTb(sim.omega[i], sim.theta[i], theta_rt, kT, Nb);
+    Tb[i] = r.Tb;
+    phase[i] = r.phase;
+    ROP[i] = c1 * Nb * Math.sqrt(Math.abs(sim.omega[i])) + c2;
+    if (i > 0) cumDepth += ROP[i] * (sim.t[i] - sim.t[i-1]);
+    depth[i] = cumDepth;
+  }
+  return { Tb, ROP, phase, depth };
+}
+
+/* =====================================================================
+   PLOTLY: One-time setup, then fast marker updates via restyle
+===================================================================== */
+const plotLayout = {
+  font: { family: 'Segoe UI', size: 11, color: '#e6e6e6' },
+  margin: { l: 45, r: 15, t: 8, b: 35 },
+  paper_bgcolor: '#1a2028', plot_bgcolor: '#0f1419',
+  xaxis: { gridcolor: '#2a3542', zerolinecolor: '#2a3542', color: '#888' },
+  yaxis: { gridcolor: '#2a3542', zerolinecolor: '#2a3542', color: '#888' },
+  showlegend: true,
+  legend: { font: { size: 10 }, x: 0, y: 1.15, orientation: 'h' }
+};
+
+function trace(x, y, name, color, dash='solid') {
+  return {
+    x: Array.from(x), y: Array.from(y), name, mode: 'lines',
+    line: { color, width: 1.8, dash },
+    hovertemplate: `${name}<br>t=%{x:.2f}<br>y=%{y:.4f}<extra></extra>`
+  };
+}
+
+function markerTrace(color) {
+  return {
+    x: [0], y: [0], mode: 'markers', name: 'current',
+    marker: { color, size: 10, line: { color: '#fff', width: 2 } },
+    showlegend: false, hoverinfo: 'skip'
+  };
+}
+
+function initPlots() {
+  const ropOpen = Array.from(simOpen.ROP).map(v => v*1000);
+  const ropPI   = Array.from(simPI.ROP).map(v => v*1000);
+  const omega_ref = parseFloat(document.getElementById('omega_ref').value);
+
+  // ---- omega_b ----
+  const gd1 = document.getElementById('plot_omega');
+  if (gd1.data && gd1.data.length) Plotly.purge(gd1);
+  Plotly.newPlot('plot_omega', [
+    trace(simOpen.t, simOpen.omega, 'Open-Loop', '#e74c3c'),
+    trace(simPI.t,   simPI.omega,   'With PI',   '#2ecc71'),
+    markerTrace('#ffdd44'),
+    { x: [simOpen.t[0], simOpen.t[simOpen.t.length-1]],
+      y: [omega_ref, omega_ref], mode: 'lines', name: 'omega_ref',
+      line: { color: '#4da3ff', width: 1, dash: 'dash' } }
+  ], { ...plotLayout,
+    xaxis: { ...plotLayout.xaxis, title: 'Time (s)' },
+    yaxis: { ...plotLayout.yaxis, title: 'omega_b (rad/s)' }
+  }, { responsive: true, displayModeBar: false });
+
+  // ---- theta_b ----
+  const gd2 = document.getElementById('plot_theta');
+  if (gd2.data && gd2.data.length) Plotly.purge(gd2);
+  Plotly.newPlot('plot_theta', [
+    trace(simOpen.t, simOpen.theta, 'Open-Loop', '#e74c3c'),
+    trace(simPI.t,   simPI.theta,   'With PI',   '#2ecc71'),
+    markerTrace('#ffdd44')
+  ], { ...plotLayout,
+    xaxis: { ...plotLayout.xaxis, title: 'Time (s)' },
+    yaxis: { ...plotLayout.yaxis, title: 'theta_b (rad)' }
+  }, { responsive: true, displayModeBar: false });
+
+  // ---- T_b ----
+  const gd3 = document.getElementById('plot_Tb');
+  if (gd3.data && gd3.data.length) Plotly.purge(gd3);
+  Plotly.newPlot('plot_Tb', [
+    trace(simOpen.t, simOpen.Tb, 'Open-Loop', '#e74c3c'),
+    trace(simPI.t,   simPI.Tb,   'With PI',   '#2ecc71'),
+    markerTrace('#ffdd44')
+  ], { ...plotLayout,
+    xaxis: { ...plotLayout.xaxis, title: 'Time (s)' },
+    yaxis: { ...plotLayout.yaxis, title: 'T_b (N.m)' }
+  }, { responsive: true, displayModeBar: false });
+
+  // ---- ROP ----
+  const gd4 = document.getElementById('plot_ROP');
+  if (gd4.data && gd4.data.length) Plotly.purge(gd4);
+  Plotly.newPlot('plot_ROP', [
+    trace(simOpen.t, ropOpen, 'Open-Loop', '#e74c3c'),
+    trace(simPI.t,   ropPI,   'With PI',   '#2ecc71'),
+    markerTrace('#ffdd44')
+  ], { ...plotLayout,
+    xaxis: { ...plotLayout.xaxis, title: 'Time (s)' },
+    yaxis: { ...plotLayout.yaxis, title: 'ROP (mm/s)' }
+  }, { responsive: true, displayModeBar: false });
+}
+
+/* Fast marker update via Plotly.restyle */
+function updateMarkers(idx, omega, theta, Tb, ROP, t) {
+  Plotly.restyle('plot_omega', { x: [[t]], y: [[omega]] }, [2]);
+  Plotly.restyle('plot_theta', { x: [[t]], y: [[theta]] }, [2]);
+  Plotly.restyle('plot_Tb',    { x: [[t]], y: [[Tb]] }, [2]);
+  Plotly.restyle('plot_ROP',   { x: [[t]], y: [[ROP*1000]] }, [2]);
+}
+
+/* =====================================================================
+   THREE.JS 3D SCENE: Wellbore, Drillstring, and Bit
+===================================================================== */
+let scene, camera, renderer, drillString, bit, rockLayers;
+let camAngle = 0;
+
+function initThree() {
+  const canvas = document.getElementById('canvas3d');
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0a0e12, 30, 120);
+
+  camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 500);
+  camera.position.set(28, 18, 38);
+  camera.lookAt(0, -5, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  canvas.appendChild(renderer.domElement);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9);
+  dl.position.set(20, 40, 20); scene.add(dl);
+  const bl = new THREE.DirectionalLight(0x4da3ff, 0.4);
+  bl.position.set(-20, -10, -20); scene.add(bl);
+
+  // Wellbore (casing)
+  const wellH = 62;
+  const wellbore = new THREE.Mesh(
+    new THREE.CylinderGeometry(6, 6, wellH, 32, 1, true),
+    new THREE.MeshPhongMaterial({ color: 0x3a4a5e, side: THREE.BackSide,
+      transparent: true, opacity: 0.35, shininess: 30 })
+  );
+  wellbore.position.y = -wellH/2 + 10;
+  scene.add(wellbore);
+
+  // Rock layers
+  rockLayers = new THREE.Group();
+  const shades = [0x5a4633, 0x4a3826, 0x6b5744, 0x3d2f20];
+  for (let i = 0; i < 4; i++) {
+    const layer = new THREE.Mesh(
+      new THREE.CylinderGeometry(6.5, 6.5, 2, 24),
+      new THREE.MeshPhongMaterial({ color: shades[i], shininess: 5 })
+    );
+    layer.position.y = -wellH + 10 + i*2;
+    rockLayers.add(layer);
+  }
+  scene.add(rockLayers);
+
+  // Drill string (segments + joint rings)
+  drillString = new THREE.Group();
+  const segCount = 20, segHeight = 2.5;
+  for (let i = 0; i < segCount; i++) {
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 0.9, segHeight*0.9, 12),
+      new THREE.MeshPhongMaterial({ color: 0xb0b8c4, shininess: 80 })
+    );
+    seg.position.y = 10 - i*segHeight;
+    seg.userData = { baseY: seg.position.y, index: i, isSeg: true };
+    drillString.add(seg);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.1, 6, 12),
+      new THREE.MeshPhongMaterial({ color: 0x707880 })
+    );
+    ring.rotation.x = Math.PI/2;
+    ring.position.y = seg.position.y - segHeight/2;
+    drillString.add(ring);
+  }
+  scene.add(drillString);
+
+  // Drill bit (cone + teeth + pivot)
+  bit = new THREE.Group();
+  const bitBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.4, 0.8, 2.2, 12),
+    new THREE.MeshPhongMaterial({ color: 0x8a8a8a, shininess: 100 })
+  );
+  bitBody.position.y = -1.1;
+  bit.add(bitBody);
+
+  for (let i = 0; i < 6; i++) {
+    const ang = (i/6) * Math.PI * 2;
+    const tooth = new THREE.Mesh(
+      new THREE.ConeGeometry(0.3, 0.7, 6),
+      new THREE.MeshPhongMaterial({ color: 0xcccccc })
+    );
+    tooth.position.set(Math.cos(ang)*1.0, -1.8, Math.sin(ang)*1.0);
+    tooth.rotation.x = Math.PI;
+    bit.add(tooth);
+  }
+  const pivot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 12, 12),
+    new THREE.MeshPhongMaterial({ color: 0xffaa33, emissive: 0x442200 })
+  );
+  pivot.position.y = -2.2;
+  bit.add(pivot);
+  bit.userData = { pivot, segHeight, segCount, baseY: 10 - segCount*segHeight };
+  bit.position.y = bit.userData.baseY;
+  scene.add(bit);
+
+  // Top drive
+  const topDrive = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 1.5, 4),
+    new THREE.MeshPhongMaterial({ color: 0xffaa33, emissive: 0x221100 })
+  );
+  topDrive.position.y = 11;
+  scene.add(topDrive);
+
+  // Rotary direction arrows
+  for (let i = 0; i < 4; i++) {
+    const ang = (i/4)*Math.PI*2;
+    const arr = new THREE.Mesh(
+      new THREE.ConeGeometry(0.3, 0.8, 6),
+      new THREE.MeshPhongMaterial({ color: 0xffdd44 })
+    );
+    arr.position.set(Math.cos(ang)*2.2, 11.5, Math.sin(ang)*2.2);
+    arr.rotation.z = -Math.PI/2;
+    arr.rotation.y = -ang;
+    scene.add(arr);
+  }
+
+  // Surface grid
+  const grid = new THREE.GridHelper(60, 20, 0x4da3ff, 0x2a3542);
+  grid.position.y = 11;
+  grid.material.opacity = 0.4;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  window.addEventListener('resize', onResize);
+}
+
+function onResize() {
+  const canvas = document.getElementById('canvas3d');
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+
+/* =====================================================================
+   SCENE UPDATE: called per animation frame
+===================================================================== */
+function updateScene(frameIdx) {
+  if (!simOpen || !simPI) return;
+
+  const usePI = currentMode === 'pi';
+  const sim = usePI ? simPI : simOpen;
+
+  const idx = Math.min(frameIdx, sim.t.length - 1);
+  if (idx < 0) return;
+
+  const theta_b = sim.theta[idx];
+  const omega_b = sim.omega[idx];
+  const Tb = sim.Tb[idx];
+  const ROP = sim.ROP[idx];
+  const phase = sim.phase[idx];
+  const depth = sim.depth[idx];
+  const simTime = sim.t[idx];
+
+  // Bit rotation (amplified for visual clarity)
+  bit.rotation.y = theta_b * 3;
+
+  // Drill string twist
+  const twistAmt = Math.max(-0.5, Math.min(0.5, omega_b * 0.04));
+  drillString.children.forEach(child => {
+    if (child.userData && child.userData.isSeg) {
+      const norm = child.userData.index / bit.userData.segCount;
+      child.rotation.y = twistAmt * norm;
+    }
+  });
+
+  // Bit vertical vibration
+  const speedNorm = Math.min(1, Math.abs(omega_b) / 12);
+  const vib = phase === 'Stick' ? 0 : 0.12 * speedNorm * Math.sin(performance.now()*0.02);
+  bit.position.y = bit.userData.baseY + vib;
+
+  // Pivot glow based on Tb
+  const tbNorm = Math.min(1, Math.abs(Tb) / 5000);
+  bit.userData.pivot.material.emissive.setHSL(0.05, 1, 0.1 + tbNorm*0.4);
+  bit.userData.pivot.scale.setScalar(1 + tbNorm*0.3);
+
+  // Rock layer glow
+  rockLayers.children.forEach((layer, i) => {
+    const g = 0.15 * Math.abs(Math.sin(Tb*0.001 + i));
+    layer.material.emissive.setRGB(g, 0, 0);
+  });
+
+  // Update numeric labels
+  document.getElementById('depthLabel').textContent = 'Depth: ' + depth.toFixed(2) + ' m';
+  document.getElementById('s_omega').textContent = omega_b.toFixed(3);
+  document.getElementById('s_rop').textContent = (ROP*1000).toFixed(3);
+  document.getElementById('s_tb').textContent = Tb.toFixed(1);
+  const phaseEl = document.getElementById('s_phase');
+  phaseEl.textContent = phase;
+  phaseEl.style.color =
+    phase === 'Stick' ? '#e74c3c' : (phase === 'Slip' ? '#2ecc71' : '#f39c12');
+
+  document.getElementById('timeCurrent').textContent = simTime.toFixed(2) + ' s';
+
+  // Timeline slider sync
+  document.getElementById('timeSlider').value = idx;
+
+  // Fast marker updates
+  updateMarkers(idx, omega_b, theta_b, Tb, ROP, simTime);
+}
+
+/* =====================================================================
+   PLAYBACK ENGINE: real-time pacing with speed control
+===================================================================== */
+function currentSim() {
+  return currentMode === 'pi' ? simPI : simOpen;
+}
+
+function togglePlay() {
+  if (!simOpen || !simPI) return;
+  isPlaying = !isPlaying;
+  const btn = document.getElementById('btnPlay');
+  if (isPlaying) {
+    btn.innerHTML = '&#10074;&#10074;';   // pause icon
+    const slider = document.getElementById('timeSlider');
+    const startIdx = parseInt(slider.value);
+    playStartWallTime = performance.now();
+    playStartSimTime = currentSim().t[startIdx];
+    lastFrameIdx = startIdx - 1;
+    if (!animationLoopId) animationLoopId = requestAnimationFrame(playLoop);
+  } else {
+    btn.innerHTML = '&#9654;';            // play icon
+    if (animationLoopId) {
+      cancelAnimationFrame(animationLoopId);
+      animationLoopId = null;
+    }
+  }
+}
+
+function resetPlayback() {
+  isPlaying = false;
+  document.getElementById('btnPlay').innerHTML = '&#9654;';
+  if (animationLoopId) {
+    cancelAnimationFrame(animationLoopId);
+    animationLoopId = null;
+  }
+  document.getElementById('timeSlider').value = 0;
+  updateScene(0);
+}
+
+function updateSpeed(val) {
+  playbackSpeed = parseFloat(val);
+  document.getElementById('speedVal').textContent = playbackSpeed.toFixed(1) + '\u00D7';
+  if (isPlaying) {
+    const slider = document.getElementById('timeSlider');
+    const idx = parseInt(slider.value);
+    playStartWallTime = performance.now();
+    playStartSimTime = currentSim().t[idx];
+    lastFrameIdx = idx - 1;
+  }
+}
+
+function playLoop() {
+  if (!isPlaying) { animationLoopId = null; return; }
+
+  const now = performance.now();
+  const elapsedWall = (now - playStartWallTime) / 1000;
+  const simTime = playStartSimTime + elapsedWall * playbackSpeed;
+  const sim = currentSim();
+
+  let idx = binarySearch(sim.t, simTime);
+  if (idx >= sim.t.length - 1) {
+    idx = sim.t.length - 1;
+    isPlaying = false;
+    document.getElementById('btnPlay').innerHTML = '&#9654;';
+    updateScene(idx);
+    animationLoopId = null;
+    return;
+  }
+
+  if (idx !== lastFrameIdx) {
+    lastFrameIdx = idx;
+    updateScene(idx);
+  }
+
+  // FPS counter
+  fpsSamples.push(now);
+  if (fpsSamples.length > 30) fpsSamples.shift();
+  if (fpsSamples.length > 1) {
+    const fps = 1000 / ((fpsSamples[fpsSamples.length-1] - fpsSamples[0]) / (fpsSamples.length-1));
+    document.getElementById('fpsBadge').textContent = 'FPS: ' + fps.toFixed(0);
+  }
+
+  animationLoopId = requestAnimationFrame(playLoop);
+}
+
+function binarySearch(arr, target) {
+  let lo = 0, hi = arr.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < target) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+/* =====================================================================
+   MANUAL TIMELINE SCRUB
+===================================================================== */
+function onTimelineChange(val) {
+  if (isPlaying) {
+    isPlaying = false;
+    document.getElementById('btnPlay').innerHTML = '&#9654;';
+    if (animationLoopId) { cancelAnimationFrame(animationLoopId); animationLoopId = null; }
+  }
+  updateScene(parseInt(val));
+}
+
+/* =====================================================================
+   MODE TOGGLE: open-loop vs PI-controlled
+===================================================================== */
+function setMode(m) {
+  currentMode = m;
+  document.getElementById('btnOpen').classList.toggle('active', m === 'open');
+  document.getElementById('btnPI').classList.toggle('active', m === 'pi');
+  const badge = document.getElementById('modeBadge');
+  if (m === 'open') {
+    badge.textContent = 'Open-Loop';
+    badge.style.background = 'rgba(231,76,60,0.9)';
+  } else {
+    badge.textContent = 'PI Control';
+    badge.style.background = 'rgba(46,204,113,0.9)';
+  }
+  if (simOpen && simPI) {
+    const slider = document.getElementById('timeSlider');
+    const idx = parseInt(slider.value);
+    if (isPlaying) {
+      playStartWallTime = performance.now();
+      playStartSimTime = currentSim().t[Math.min(idx, currentSim().t.length-1)];
+      lastFrameIdx = idx - 1;
+    }
+    updateScene(idx);
+  }
+}
+
+/* =====================================================================
+   RUN SIMULATION
+===================================================================== */
+function runSimulation() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = 'Solving...';
+
+  setTimeout(() => {
+    const omega_ref = parseFloat(document.getElementById('omega_ref').value);
+    const WOB_kN = parseFloat(document.getElementById('WOB').value);
+    const kT = parseFloat(document.getElementById('kT').value);
+    const cv = parseFloat(document.getElementById('cv').value);
+    const Kp = parseFloat(document.getElementById('Kp').value);
+    const Ki = parseFloat(document.getElementById('Ki').value);
+    const tmax = parseFloat(document.getElementById('tmax').value);
+    const c1 = parseFloat(document.getElementById('c1').value);
+    const Nb = WOB_kN * 1000;   // kN -> N
+
+    const x0 = [0, 0, 0];
+    const t0 = performance.now();
+
+    // Open-loop
+    const paramsOpen = { J, cv, kT, omega_ref, Nb, c1, mode: 'open', Kp, Ki };
+    const rawOpen = solveRK4(tmax, DT, x0, paramsOpen);
+    const ppOpen = postProcess(rawOpen, paramsOpen);
+    simOpen = { ...rawOpen, ...ppOpen };
+
+    // PI-controlled
+    const paramsPI = { J, cv, kT, omega_ref, Nb, c1, mode: 'pi', Kp, Ki };
+    const rawPI = solveRK4(tmax, DT, x0, paramsPI);
+    const ppPI = postProcess(rawPI, paramsPI);
+    simPI = { ...rawPI, ...ppPI };
+
+    const elapsed = ((performance.now() - t0)/1000).toFixed(2);
+    console.log(`Solved in ${elapsed}s - ${simOpen.t.length} frames, tmax=${tmax}s`);
+
+    // Configure timeline
+    const slider = document.getElementById('timeSlider');
+    slider.max = simOpen.t.length - 1;
+    slider.value = 0;
+    document.getElementById('timeTotal').textContent = tmax.toFixed(2) + ' s';
+
+    initPlots();
+    updateScene(0);
+
+    btn.disabled = false;
+    btn.innerHTML = '&#9654; Run Simulation';
+
+    // Auto-start playback
+    isPlaying = false;
+    togglePlay();
+  }, 50);
+}
+
+/* =====================================================================
+   THREE.JS RENDER LOOP (independent of playback)
+===================================================================== */
+function threeLoop() {
+  requestAnimationFrame(threeLoop);
+  camAngle += 0.0015;
+  camera.position.x = 28 * Math.cos(camAngle) + 5;
+  camera.position.z = 38 * Math.sin(camAngle) + 5;
+  camera.lookAt(0, -5, 0);
+  renderer.render(scene, camera);
+}
+
+/* =====================================================================
+   BOOTSTRAP
+===================================================================== */
+window.addEventListener('load', () => {
+  initThree();
+  threeLoop();
+  setTimeout(runSimulation, 300);
+});
+</script>
+</body>
+</html>
